@@ -32,22 +32,32 @@ _start:
     call add_slash
     unstack_all
     mov rsi, rax
+
+    call find_rec
+    
+    call exit
+
+; rdi=unused rsi=null_pos
+find_rec:
     stack_all
     mov rdi, path
     call open
     unstack_all
     mov r8, rax ; fd
+
     stack_all
     mov rdi, r8
     call getdents
     unstack_all
+
     stack_all
     mov rdi, rax
-    call find
+    call list
     unstack_all
-    mov rdi, r8
+
+    mov rdi, rax
     call close
-    call exit
+    ret
 
 ; rdi=suffix* rsi=null_pos
 ; ret rax=new_null_pos
@@ -184,8 +194,9 @@ check_dots:
     mov rax, 1
     ret
 
-; rdi=bytes rsi=null_pos
-find:
+; rdi=bytes rsi=null_pos r8=fd
+; ret rax=new_fd
+list:
     mov r10, 0 ; current dirent offset
     .loop:
         stack_all
@@ -194,30 +205,63 @@ find:
         unstack_all
         cmp rax, 1
         je .increment
+
+
         stack_all
         lea rdi, [dirp+r10+19]
         call add_sufix
         unstack_all
         mov rdx, rax
-        mov al, BYTE [dirp+r10+18] ; type
-        cmp al, DT_DIR
-        .directory:
-        jne .file
-        stack_all
-        mov rdi, rdx
-        call add_slash
-        unstack_all
-        .file:
+        
         stack_all
         mov rdi, path
         call write
         unstack_all
+
+        mov al, BYTE [dirp+r10+18] ; type
+        cmp al, DT_DIR
+        jne .increment
+        .directory:
+        stack_all
+        mov rdi, rdx
+        call add_slash
+        unstack_all
+
+        stack_all
+        mov rsi, rax
+        call find_rec
+        unstack_all
+
+        mov [path+rsi], BYTE 0
+
+        stack_all
+        mov rdi, r8
+        mov rsi, path
+        call restart_fd
+        unstack_all
+        mov r8, rax
+
+        stack_all
+        mov rdi, r8
+        call getdents
+        unstack_all
+        mov rdi, rax
+
         .increment:
         mov rax, 0
         mov ax, [dirp+r10+16]
         add r10, rax
         cmp r10, rdi
         jl .loop 
+        mov rax, r8
+    ret
+
+;rdi=fd rsi=path*
+;ret rax=new_fd
+restart_fd:
+    call close
+    mov rdi, rsi
+    call open
     ret
 
 exit:

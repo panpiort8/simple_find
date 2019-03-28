@@ -1,3 +1,5 @@
+all: find.x
+
 
 %.x : %.o
 	ld $^ -s -o $@
