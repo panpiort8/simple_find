@@ -4,27 +4,88 @@ BITS 64
     push rdi
     push rsi
     push rdx
+    push r10
+    push r8
+    push r9
 %endmacro
 
 %macro unstack_all 0
+    pop r9
+    pop r8
+    pop r10
     pop rdx
     pop rsi
     pop rdi
 %endmacro
+
+%define DT_DIR 4
 
 SECTION .text
 GLOBAL _start
 ; args: rdi, rsi, rdx, r10, r8, r9
 _start:
     mov rdi, [rsp+16]
-    ; call write
+    mov rsi, 0
+    stack_all
+    call add_sufix
+    mov rdi, rax
+    call add_slash
+    unstack_all
+    mov rsi, rax
+    stack_all
+    mov rdi, path
     call open
+    unstack_all
     mov r8, rax ; fd
+    stack_all
     mov rdi, r8
     call getdents
+    unstack_all
+    stack_all
     mov rdi, rax
-    call ls
+    call find
+    unstack_all
+    mov rdi, r8
+    call close
     call exit
+
+; rdi=suffix* rsi=null_pos
+; ret rax=new_null_pos
+add_sufix:
+    stack_all
+    call strlen
+    unstack_all
+    lea r10, [rsi+rax]
+    lea rdx, [rax+1]
+    mov r9, rdi
+    lea rdi, [path+rsi]
+    mov rsi, r9
+    stack_all
+    call memcpy
+    unstack_all
+    mov rax, r10
+    ret
+
+; rdi=null_pos
+; ret rax=new_null_pos
+add_slash:
+    mov [path+rdi], BYTE 47
+    lea rax, [rdi+1]
+    mov [path+rax], BYTE 0
+    ret
+
+; rdi=target* rsi=source* rdx=bytes
+memcpy:
+    mov r10, 0 ; i
+    .loop:
+        cmp r10, rdx
+        jge .end
+        mov al, BYTE [rsi+r10]
+        mov BYTE [rdi+r10], al
+        inc r10
+        jmp .loop
+    .end:
+    ret
 
 ; rdi=buf*
 strlen:
@@ -61,7 +122,7 @@ close:
 ; rdi=fd
 ; ret rax=bytes
 getdents:
-    mov rax, 78
+    mov rax, 217
     mov rsi, dirp
     mov rdx, 4096
     sub rsp, 8
@@ -94,19 +155,68 @@ write_endl:
     add rsp, 8
     ret
 
-; rdi=bytes
-ls:
-    mov rsi, 0 ; current dirent offset
-    mov rdx, rdi
+; rdi=buf*
+; ret rax=1 if buf* is dotted
+check_dots:
+    stack_all
+    call strlen
+    unstack_all
+    cmp rax, 1
+    jne .more
+    .one:
+    mov dl, BYTE [rdi]
+    cmp dl, 46
+    je .bad
+    jmp .ok
+    .more:
+    cmp rax, 2
+    jne .ok
+    mov dl, BYTE [rdi]
+    cmp dl, 46
+    jne .ok
+    mov dl, BYTE [rdi+1]
+    cmp dl, 46
+    je .bad
+    .ok:
+    mov rax, 0
+    ret
+    .bad:
+    mov rax, 1
+    ret
+
+; rdi=bytes rsi=null_pos
+find:
+    mov r10, 0 ; current dirent offset
     .loop:
-        lea rdi, [dirp+rsi+18]
         stack_all
+        lea rdi, [dirp+r10+19]
+        call check_dots
+        unstack_all
+        cmp rax, 1
+        je .increment
+        stack_all
+        lea rdi, [dirp+r10+19]
+        call add_sufix
+        unstack_all
+        mov rdx, rax
+        mov al, BYTE [dirp+r10+18] ; type
+        cmp al, DT_DIR
+        .directory:
+        jne .file
+        stack_all
+        mov rdi, rdx
+        call add_slash
+        unstack_all
+        .file:
+        stack_all
+        mov rdi, path
         call write
         unstack_all
-        mov rdi, 0
-        mov di, [dirp+rsi+16]
-        add rsi, rdi
-        cmp rsi, rdx
+        .increment:
+        mov rax, 0
+        mov ax, [dirp+r10+16]
+        add r10, rax
+        cmp r10, rdi
         jl .loop 
     ret
 
@@ -118,7 +228,7 @@ exit:
 SECTION .bss
 
 dirp: resb 4096
-num: resb 8
+path: resb 4096
 
 SECTION .data
 
