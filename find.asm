@@ -29,7 +29,8 @@ GLOBAL _start
 _start:
     mov rdi, [rsp+16]
     mov rsi, 0
-    call add_sufix
+    call add_suffix
+
     mov rdi, rax ; null_pos
     stack_all
     call has_slash
@@ -159,7 +160,8 @@ dive_rec:
             .is_not_dotted:
                 stack_all
                 lea rdi, [rdx+r10+19]
-                call add_sufix
+                call add_suffix
+            
                 unstack_all
                 mov r9, rax ; new_null_pos
                 
@@ -252,7 +254,7 @@ add_slash:
 
 ; rdi=suffix* rsi=null_pos
 ; ret rax=new_null_pos
-add_sufix:
+add_suffix:
     stack_all
     call strlen
     unstack_all
