@@ -19,6 +19,8 @@ BITS 64
 %endmacro
 
 %define DT_DIR 4
+%define S_IFMT 0xf000
+%define S_IFDIR 0x4000
 
 SECTION .text
 GLOBAL _start
@@ -63,8 +65,8 @@ _start:
 
     .exists:
     mov eax, DWORD [stat+24]
-    and eax, 0xf000
-    and eax, 0x4000
+    and eax, S_IFMT
+    and eax, S_IFDIR
     cmp eax, 0
     jg .directory
         cmp r10, 0
@@ -138,13 +140,13 @@ getdents:
 ; rdi=fd rsi=null_pos rdx=dents*
 dive_rec:
     .main_loop:
-        mov r10, 0 ; current dirent offset
         stack_all
         mov rsi, rdx
         call getdents
         unstack_all
         cmp rax, 0
         jle .end
+        mov r10, 0 ; current dirent offset
         mov r8, rax ; bytes
         .loop:
             stack_all
