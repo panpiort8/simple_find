@@ -79,12 +79,119 @@ _start:
             call exit
 
     .directory:
+        cmp r10, 0
+        je .without_slash_2
+        .with_slash_2:
+            stack_all
+            call add_slash
+            unstack_all
+            mov rdi, rax
+            stack_all
+            mov rdi, path
+            call write
+            unstack_all
+            jmp .go_rec
+        .without_slash_2:
+            stack_all
+            mov rdi, path
+            call write
+            unstack_all
+            stack_all
+            call add_slash
+            unstack_all
+            mov rdi, rax
+        .go_rec:
+        call dir_rec
+        call exit
+
+; rdi=null_pos
+dir_rec:
     stack_all
-    call add_slash
+    mov rdi, path
+    call open
     unstack_all
-    mov rsi, rax
-    call find_rec
-    call exit
+    mov r8, rax ; fd
+
+    stack_all
+    sub rsp, 4096
+    mov rsi, rdi
+    mov rdi, r8
+    mov rdx, rsp
+    call dive_rec
+    add rsp, 4096
+    unstack_all
+
+    mov rdi, r8
+    call close
+    ret
+
+; rdi=fd, rsi=dents* 
+; ret rax=bytes
+getdents:
+    mov rax, 217
+    mov rdx, 4096
+    sub rsp, 8
+    syscall
+    add rsp, 8
+    ret
+
+; rdi=fd rsi=null_pos rdx=dents*
+dive_rec:
+    .main_loop:
+        mov r10, 0 ; current dirent offset
+        stack_all
+        mov rsi, rdx
+        call getdents
+        unstack_all
+        cmp rax, 0
+        jle .end
+        mov r8, rax ; bytes
+        .loop:
+            stack_all
+            lea rdi, [rdx+r10+19]
+            call check_dots
+            unstack_all
+            cmp rax, 1
+            je .increment
+
+            .is_not_dotted:
+                stack_all
+                lea rdi, [rdx+r10+19]
+                call add_sufix
+                unstack_all
+                mov r9, rax ; new_null_pos
+                
+                stack_all
+                mov rdi, path
+                call write
+                unstack_all
+
+                mov al, BYTE [rdx+r10+18] ; type
+                cmp al, DT_DIR
+                jne .increment
+
+                .is_directory:
+                    stack_all
+                    mov rdi, r9
+                    call add_slash
+                    unstack_all
+
+                    stack_all
+                    mov rdi, rax
+                    call dir_rec ; recursive
+                    unstack_all
+
+                    mov [path+rsi], BYTE 0 
+
+            .increment:
+            mov rax, 0
+            mov ax, [rdx+r10+16]
+            add r10, rax
+            cmp r10, r8
+            jl .loop
+        jmp .main_loop
+    .end:
+    ret
 
 ; rdi=path*
 ; return rax=0 if exists -1 oth
@@ -139,93 +246,6 @@ add_slash:
     mov [path+rdi], BYTE 47
     lea rax, [rdi+1]
     mov [path+rax], BYTE 0
-    ret
-
-; rdi=unused rsi=null_pos
-find_rec:
-    stack_all
-    mov rdi, path
-    call open
-    unstack_all
-    cmp rax, 0
-    jge .continue
-    ret
-    .continue:
-    mov r8, rax ; fd
-    stack_all
-    mov rdi, r8
-    call getdents
-    unstack_all
-
-    stack_all
-    mov rdi, rax
-    call list
-    unstack_all
-
-    mov rdi, rax
-    call close
-    ret
-
-; rdi=bytes rsi=null_pos r8=fd
-; ret rax=new_fd
-list:
-    mov r10, 0 ; current dirent offset
-    .loop:
-        stack_all
-        lea rdi, [dirp+r10+19]
-        call check_dots
-        unstack_all
-        cmp rax, 1
-        je .increment
-
-
-        stack_all
-        lea rdi, [dirp+r10+19]
-        call add_sufix
-        unstack_all
-        mov rdx, rax
-        
-        stack_all
-        mov rdi, path
-        call write
-        unstack_all
-
-        mov al, BYTE [dirp+r10+18] ; type
-        cmp al, DT_DIR
-        jne .increment
-        .directory:
-        stack_all
-        mov rdi, rdx
-        call add_slash
-        unstack_all
-
-        stack_all
-        mov rsi, rax
-        call find_rec
-        unstack_all
-
-        mov [path+rsi], BYTE 0
-
-        stack_all
-        mov rdi, r8
-        mov rsi, path
-        call restart_fd
-        unstack_all
-        mov r8, rax
-
-        stack_all
-        mov rdi, r8
-        call getdents
-        unstack_all
-        mov rdi, rax
-
-        .increment:
-        mov rax, 0
-        mov ax, [dirp+r10+16]
-        add r10, rax
-        cmp r10, rdi
-        jl .loop 
-        mov rax, r8
     ret
 
 ; rdi=suffix* rsi=null_pos
@@ -318,25 +338,6 @@ close:
     add rsp, 8
     ret
 
-;rdi=fd rsi=path*
-;ret rax=new_fd
-restart_fd:
-    call close
-    mov rdi, rsi
-    call open
-    ret
-
-; rdi=fd
-; ret rax=bytes
-getdents:
-    mov rax, 217
-    mov rsi, dirp
-    mov rdx, 4096
-    sub rsp, 8
-    syscall
-    add rsp, 8
-    ret
-
 ; rdi=buf*
 pure_write:
     stack_all
@@ -373,13 +374,10 @@ exit:
     syscall
 
 SECTION .bss
-
-dirp: resb 4096
 path: resb 4096
 stat: resb 4096
 
 SECTION .data
-
 endl: db "", 10, 0
 pref: db "find: ‘" , 0, 0
 suf_bad: db "’: No such file or directory", 10, 0
